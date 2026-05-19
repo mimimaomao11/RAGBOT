@@ -1,6 +1,6 @@
 # 🏍️ 機車保險知識型 RAG 問答助手
 
-部署網站：https://aiot-hw4-gd3hw6qcbqhsasktrcvwn4.streamlit.app/
+部署網站：[ragbot](https://ragbot-lgmgc4jvyetfrdzzrbpfq4.streamlit.app/)
 
 這是一個基於 RAG（Retrieval-Augmented Generation）架構的問答應用程式，專門回答關於台灣機車保險（強制險與第三人責任險）的相關問題。
 
