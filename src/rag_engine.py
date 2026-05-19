@@ -1,8 +1,11 @@
 import os
+import sys
 import streamlit as st
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from openai import OpenAI
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHROMA_DIR = os.path.join(BASE_DIR, "embeddings", "chroma_db")
@@ -25,10 +28,28 @@ class RAGEngine:
         )
         self.collection = self._load_chroma_db()
 
+    def _build_db(self):
+        from preprocess import load_articles
+        with st.spinner("首次啟動，正在建立向量資料庫，請稍候..."):
+            os.makedirs(CHROMA_DIR, exist_ok=True)
+            client = chromadb.PersistentClient(path=CHROMA_DIR)
+            try:
+                client.delete_collection(name="insurance_kb")
+            except Exception:
+                pass
+            collection = client.get_or_create_collection(
+                name="insurance_kb",
+                embedding_function=self.embedding_fn
+            )
+            chunks_with_metadata = load_articles()
+            ids = [f"doc_{i}" for i in range(len(chunks_with_metadata))]
+            documents = [chunk for chunk, _ in chunks_with_metadata]
+            metadatas = [{"source": source} for _, source in chunks_with_metadata]
+            collection.add(ids=ids, documents=documents, metadatas=metadatas)
+
     def _load_chroma_db(self):
         if not os.path.exists(CHROMA_DIR):
-            st.error("ChromaDB 資料庫不存在，請先執行 build_vector_db.py 來建立索引。")
-            st.stop()
+            self._build_db()
 
         client = chromadb.PersistentClient(path=CHROMA_DIR)
         try:
