@@ -1,14 +1,11 @@
 import os
 import sys
+import numpy as np
 import streamlit as st
-import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHROMA_DIR = os.path.join(BASE_DIR, "embeddings", "chroma_db")
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
@@ -21,71 +18,33 @@ def get_openai_client():
     return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
-class RAGEngine:
-    def __init__(self, model_name=MODEL_NAME):
-        self.embedding_fn = SentenceTransformerEmbeddingFunction(
-            model_name=model_name
-        )
-        self.collection = self._load_chroma_db()
-
-    def _build_db(self):
-        from preprocess import load_articles
-        with st.spinner("首次啟動，正在建立向量資料庫，請稍候..."):
-            os.makedirs(CHROMA_DIR, exist_ok=True)
-            client = chromadb.PersistentClient(path=CHROMA_DIR)
-            try:
-                client.delete_collection(name="insurance_kb")
-            except Exception:
-                pass
-            collection = client.get_or_create_collection(
-                name="insurance_kb",
-                embedding_function=self.embedding_fn
-            )
-            chunks_with_metadata = load_articles()
-            ids = [f"doc_{i}" for i in range(len(chunks_with_metadata))]
-            documents = [chunk for chunk, _ in chunks_with_metadata]
-            metadatas = [{"source": source} for _, source in chunks_with_metadata]
-            collection.add(ids=ids, documents=documents, metadatas=metadatas)
-
-    def _load_chroma_db(self):
-        if not os.path.exists(CHROMA_DIR):
-            self._build_db()
-
-        client = chromadb.PersistentClient(path=CHROMA_DIR)
-        try:
-            collection = client.get_collection(
-                name="insurance_kb",
-                embedding_function=self.embedding_fn
-            )
-        except Exception as e:
-            st.error(f"無法載入 ChromaDB collection：{e}")
-            st.stop()
-
-        return collection
-
-    def retrieve_docs(self, query, top_k=3):
-        """回傳 (documents, sources) tuple"""
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=top_k
-        )
-
-        retrieved_docs = results["documents"][0] if results["documents"] else []
-        retrieved_sources = [
-            meta.get("source", "未知來源")
-            for meta in (results["metadatas"][0] if results["metadatas"] else [])
-        ]
-
-        return retrieved_docs, retrieved_sources
-
-
 @st.cache_resource
 def get_rag_engine():
     return RAGEngine()
 
 
+class RAGEngine:
+    def __init__(self):
+        from preprocess import load_articles
+        self.model = SentenceTransformer(MODEL_NAME)
+        chunks_with_metadata = load_articles()
+        self.documents = [chunk for chunk, _ in chunks_with_metadata]
+        self.sources = [source for _, source in chunks_with_metadata]
+        self.embeddings = self.model.encode(self.documents, convert_to_numpy=True)
+        norms = np.linalg.norm(self.embeddings, axis=1, keepdims=True)
+        self.embeddings = self.embeddings / np.maximum(norms, 1e-10)
+
+    def retrieve_docs(self, query, top_k=3):
+        query_vec = self.model.encode([query], convert_to_numpy=True)
+        query_vec = query_vec / np.maximum(np.linalg.norm(query_vec), 1e-10)
+        scores = self.embeddings @ query_vec.T
+        top_indices = np.argsort(scores[:, 0])[::-1][:top_k]
+        docs = [self.documents[i] for i in top_indices]
+        sources = [self.sources[i] for i in top_indices]
+        return docs, sources
+
+
 def generate_answer(query):
-    """回傳 (answer, sources) tuple，sources 為去重複後的來源檔名 list"""
     rag_engine = get_rag_engine()
     client = get_openai_client()
 
