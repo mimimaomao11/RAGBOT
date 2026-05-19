@@ -6,8 +6,6 @@ __pycache__/
 /embeddings/*.bin
 /embeddings/*.npy
 
-# ChromaDB 持久化資料（本地建立，不納入版控）
-/embeddings/chroma_db/
 
 # 虛擬環境
 /rag_env/
